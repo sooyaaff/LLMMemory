@@ -32,6 +32,21 @@ skills是catalog中skill_id的去重数组；没有可提取内容时输出空�
 这些需要证据的复杂判断由后续提取、来源审核和事实关系阶段处理。
 """
 
+# generic-flow 仍由路由阶段收集控制线索；fact-driven 使用 ROUTER 和独立 source_control。
+GENERIC_ROUTER = COMMON + """按catalog选择相关Skill，允许空；输出skills,signals,reason。
+检查当前窗口的更正、状态变化、否定、主体切换、明确保存控制；不新增全窗口扫描。
+signal字段：kind(correction/change/denial/withdrawal/subject_switch)、subject_key、attribute_key、scope、evidence、target_type、target_text。
+subject_key用人物描述，当前用户填null，由程序生成稳定标识。
+提到他人不等于发言者换人；故事角色、孤立“他没来”和普通“我是风水家”等身份自述都不能触发subject_switch。
+每个signal增加switch_basis(none/handoff/self_identification)和可空switch_reference(证据定位)。非换人信号固定none和null。
+subject_switch只能基于明确交接如“现在换爸爸和你聊”，或明确区别前一说话人的自我介绍；switch_reference定位这段交接原话，subject_key/target_text填有依据的新说话人。交接明确但人物未知时留null和空文本。
+evidence只返回用户原话定位evidence_id,speaker,start,end，不输出quote；位置可同时null代表完整话轮。只有明确要求不要记住/保存/记录、删除记忆、忘掉某事才是withdrawal。
+暂停、关闭、关机、以后再讲、不要讲英文、忘了名字、想不起来均不是withdrawal，不要生成此类撤回。
+target_type为item/session/all/unresolved。item的target_text为原话明确指向的事项短语，不知道目标就unresolved。
+只有明确全部记忆才all；明确本次聊天才session。scope填session、all_time或原话明确的场景；没有明确跨会话含义默认session。
+普通更正也保留明确target_text和scope，不把后来的采集时间当成更新。其他信号目标不适用填unresolved和空文本。
+""" + VALUE_POLICY
+
 COMPARE = COMMON + """比较candidates和本页history，逐条返回candidate_id,action,targets,reason,basis_refs。
 action是new/reinforce/coexist/supersede/conflict/pending。targets引用具体memory_id及revision。
 同义且同主体同属性同范围强化reinforce；不同场景、时间或独立事件可以并存coexist。

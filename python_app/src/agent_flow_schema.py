@@ -5,7 +5,7 @@ from agent_v4_schema import schema as legacy_schema
 
 def schema(role: str, data: dict) -> dict:
     s = {"type": "string"}
-    if role == "source_router":
+    if role == "source_router" and data.get("flow_version") == "fact-driven-v1":
         return obj({"skills": arr(s), "reason": s})
     if role == "source_control":
         result = legacy_schema("source_router", data)

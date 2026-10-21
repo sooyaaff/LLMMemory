@@ -26,7 +26,7 @@ def response_schema(role: str, data: dict) -> dict | None:
             "reason": string,
         }))})
     if role.startswith("source_") or role == "history_compare":
-        if data.get("flow_version") in ("generic-flow-v1", "generic-flow-v2", "generic-flow-v3-relations"):
+        if data.get("flow_version") in ("generic-flow-v1", "generic-flow-v2", "generic-flow-v3-relations", "fact-driven-v1"):
             from agent_flow_schema import schema
             return schema(role, data)
         if data.get("policy") == "source-maintenance-v4":

@@ -19,7 +19,7 @@ from agent_fact_policy import compatible_scope
 
 
 from agent_flow_data import FLOW, PROCESSING_REVISION, materialize, materialize_references, compact_fact, content_hash, source_pairs, semantic_config, EvidenceReferenceError
-from agent_prompts import COMMON, ROUTER, COMPARE, EXTRACT, REVIEW, CLASSIFY, CONSISTENCY, PHOTO_NOTICE
+from agent_prompts import COMMON, GENERIC_ROUTER, COMPARE, EXTRACT, REVIEW, CLASSIFY, CONSISTENCY, PHOTO_NOTICE
 from agent_stage_runtime import StageRuntime
 REPAIR = EXTRACT
 
@@ -519,9 +519,14 @@ class GenericPipeline:
                 r = copy.deepcopy(r)
                 session = data.get("session", dict(self.s, turns=data.get("evidence_pack", [])))
                 if role == "source_router":
-                    # 路由只决定 Skill。旧模型即使附带 signals，也不能让可选
-                    # 的证据定位协议阻断整个 Session；复杂线索改由后续阶段处理。
-                    r["signals"] = []
+                    if self.flow == "fact-driven-v1":
+                        # 新流程的控制线索来自独立 source_control，不接受路由附带的线索。
+                        r["signals"] = []
+                    else:
+                        for signal in r.get("signals", []):
+                            signal["evidence"] = materialize_references(signal["evidence"], session)
+                            ref = signal.pop("switch_reference")
+                            signal["switch_evidence"] = materialize_references([ref], session)[0] if ref is not None else None
                 else:
                     for row in r.get("results", []):
                         if "basis" in row:
@@ -604,14 +609,25 @@ class GenericPipeline:
 
     def extract_window(self, w, depth=0):
         def check(r):
-            # 新契约只有 skills/reason；为不中断旧缓存或模型偶发的 signals
-            # 字段，允许其存在但在 convert 中已经被明确丢弃。
-            if set(r) - {"skills", "reason", "signals"} or not {"skills", "reason"}.issubset(r):
+            exact_keys(r, {"skills", "signals", "reason"})
+            if not isinstance(r["skills"],list) or any(s not in SKILL_NAMES for s in r["skills"]) or len(set(r["skills"])) != len(r["skills"]) or not isinstance(r["reason"],str) or not isinstance(r["signals"],list):
                 raise ValueError("路由结构非法")
-            if not isinstance(r["skills"],list) or any(s not in SKILL_NAMES for s in r["skills"]) or len(set(r["skills"])) != len(r["skills"]) or not isinstance(r["reason"],str) or r.get("signals") != []:
-                raise ValueError("路由结构非法")
+            safe = []
+            for signal in r["signals"]:
+                try:
+                    validate_signal(signal, w)
+                except NonMemoryControl as exc:
+                    self.record_validation("source_router:control", 1, "ignored_non_memory_command", str(exc))
+                    continue
+                if signal["kind"] == "subject_switch" and not explicit_subject_switch(signal):
+                    self.record_validation("source_router:subject", 1, "ignored_unproven_switch", "没有明确交接依据，不改变候选主体")
+                    continue
+                safe.append(signal)
+            r["signals"] = safe
+            if w.get("source_kind") == "photo" and r["signals"]:
+                raise ValueError("图片不能产生保存控制")
         try:
-            route = self.ask("source_router", ROUTER, {"session":w,"catalog":[{"skill_id":k,"name":v} for k,v in SKILL_NAMES.items()]},check)
+            route = self.ask("source_router", GENERIC_ROUTER, {"session":w,"catalog":[{"skill_id":k,"name":v} for k,v in SKILL_NAMES.items()]},check)
             found = []
             self.shared = []
             for skill in route["skills"]:
